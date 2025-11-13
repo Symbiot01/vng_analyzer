@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VNG Data Analyzer</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Chart.js for graphing -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* Custom styles for Inter font and smooth transitions */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Style for table row hover */
+        #resultsTable tbody tr.metric-row:hover {
+            background-color: #f9fafb; /* Tailwind gray-50 */
+            cursor: pointer;
+        }
+        #resultsTable tbody tr.category-row:hover {
+            background-color: #e0e0e0; /* Slightly darker gray */
+            cursor: pointer;
+        }
+        .toggle-icon {
+            display: inline-block;
+            margin-right: 8px;
+            transition: transform 0.2s ease-in-out;
+            font-size: 0.8em;
+            /* Use a simple triangle for the icon */
+            width: 0; 
+            height: 0; 
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 6px solid #333; /* Pointing down */
+        }
+        .toggle-icon.closed {
+            transform: rotate(-90deg); /* Pointing right */
+        }
+        .toggle-icon.open {
+            transform: rotate(0deg); /* Pointing down */
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen text-gray-800 p-4 md:p-8">
+    <div class="max-w-7xl mx-auto bg-white rounded-lg shadow-xl p-6 md:p-10">
+        
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-blue-600">VNG Data Analyzer</h1>
+            <p class="text-lg text-gray-600 mt-2">Compare VNG reports, track changes, and get AI-powered interpretations.</p>
+        </div>
+
+        <!-- File Upload Section -->
+        <div class="mb-6">
+            <label for="fileUpload" class="block text-lg font-semibold mb-3 text-gray-700">1. Upload VNG Reports</label>
+            <div id="dropZone" class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center bg-gray-50 transition-colors duration-300 ease-in-out">
+                <input type="file" id="fileUpload" multiple accept=".txt" class="hidden">
+                <label for="fileUpload" class="cursor-pointer">
+                    <p class="text-gray-500">Drag & drop your files here, or <span class="text-blue-600 font-medium">click to browse</span></p>
+                    <p class="text-sm text-red-600 font-semibold mt-2">IMPORTANT: Files must be plain text (.txt)</p>
+                </label>
+                <div id="fileList" class="mt-4 text-left text-sm text-gray-700"></div>
+            </div>
+        </div>
+
+        <!-- Analyze Button -->
+        <div class="text-center mb-6">
+            <button id="analyzeButton" class="bg-blue-600 text-white font-semibold py-3 px-8 rounded-lg shadow-md hover:bg-blue-700 transition-all duration-300 ease-in-out transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                Analyze Files
+            </button>
+        </div>
+
+        <!-- Loading Spinner -->
+        <div id="loadingSpinner" class="hidden flex-col items-center justify-center my-10">
+            <div class="loader"></div>
+            <p class="text-gray-600 mt-3">Analyzing data... this may take a moment.</p>
+        </div>
+
+
+        <!-- Results Section -->
+        <div id="resultsSection" class="hidden">
+            <h2 id="resultsHeader" class="text-2xl font-semibold text-gray-800 mb-4">Analysis Results</h2>
+            
+            <!-- Chart and Table Container -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                
+                <!-- Chart Area -->
+                <div class="bg-gray-50 p-4 rounded-lg shadow-inner">
+                    <h3 class="text-xl font-semibold text-gray-700 mb-3 text-center">Test Visualization</h3>
+                    <p id="chartInstruction" class="text-center text-gray-500">Click a category or metric row in the table to see the chart.</p>
+                    <canvas id="resultChart"></canvas>
+                    <!-- NEW: Chart Disclaimer -->
+                    <p id="chartDisclaimer" class="text-center text-sm text-gray-600 mt-2 p-2 bg-gray-100 rounded-lg hidden"></p>
+                </div>
+                
+                <!-- Table Area -->
+                <div class="overflow-x-auto">
+                    <div class="h-[500px] overflow-y-auto border border-gray-200 rounded-lg">
+                        <table id="resultsTable" class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-100 sticky top-0" id="resultsTableHead">
+                                <!-- Header row will be injected by JS -->
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200" id="resultsTableBody">
+                                <!-- Rows will be injected by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Interpretation Section -->
+            <div id="interpretationSection" class="mt-10">
+                <h2 class="text-2xl font-semibold text-gray-800 mb-4">2. Clinical Interpretation</h2>
+                <p class="text-gray-600 mb-4">Click the button below to send the summarized data to Gemini for a high-level interpretation. This uses Google Search to find relevant clinical context.</p>
+                <button id="interpretButton" class="bg-green-600 text-white font-semibold py-3 px-8 rounded-lg shadow-md hover:bg-green-700 transition-all duration-300 ease-in-out transform hover:-translate-y-0.5">
+                    Get AI Interpretation
+                </button>
+                
+                <!-- Interpretation Loading and Output -->
+                <div id="interpretationLoading" class="hidden flex-col items-center justify-center my-6">
+                    <div class="loader"></div>
+                    <p class="text-gray-600 mt-3">Calling Gemini... (this uses Google Search and may take up to 30 seconds)</p>
+                </div>
+                <div id="interpretationOutput" class="mt-6 p-6 bg-gray-50 rounded-lg shadow-inner hidden prose max-w-none">
+                    <!-- AI response will be injected here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+    // Wrap entire script in DOMContentLoaded to prevent errors from script running before DOM is ready
+    window.addEventListener('DOMContentLoaded', () => {
+        // --- STATE ---
+        let allFileDataMaps = [];
+        /** @type {Map<string, Map<string, {values: number[], flags: boolean[], delta: number|null, stdDev: number|null, percentChange: number|null}>>} */
+        let analysisResults = new Map();
+        let currentChart = null;
+
+        // --- DOM ELEMENTS ---
+        const fileUpload = document.getElementById('fileUpload');
+        const dropZone = document.getElementById('dropZone');
+        const fileList = document.getElementById('fileList');
+        const analyzeButton = document.getElementById('analyzeButton');
+        const loadingSpinner = document.getElementById('loadingSpinner');
+        const resultsSection = document.getElementById('resultsSection');
+        const resultsHeader = document.getElementById('resultsHeader');
+        const resultsTableHead = document.getElementById('resultsTableHead');
+        const resultsTableBody = document.getElementById('resultsTableBody');
+        const chartInstruction = document.getElementById('chartInstruction');
+        // FIX: Use '2d' context, not 'chart'
+        const chartCanvas = document.getElementById('resultChart').getContext('2d');
+        // NEW: Get the disclaimer element
+        const chartDisclaimer = document.getElementById('chartDisclaimer');
+        const interpretButton = document.getElementById('interpretButton');
+        const interpretationLoading = document.getElementById('interpretationLoading');
+        const interpretationOutput = document.getElementById('interpretationOutput');
+
+        // --- FILE DRAG & DROP ---
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('border-blue-500', 'bg-blue-50');
+        });
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+            fileUpload.files = e.dataTransfer.files;
+            updateFileList();
+        });
+        fileUpload.addEventListener('change', updateFileList);
+
+        function updateFileList() {
+            fileList.innerHTML = '';
+            if (fileUpload.files.length > 0) {
+                const files = Array.from(fileUpload.files);
+                const list = document.createElement('ul');
+                list.classList.add('list-disc', 'list-inside');
+                files.forEach(file => {
+                    if (file.type === 'text/plain') {
+                        const li = document.createElement('li');
+                        li.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+                        list.appendChild(li);
+                    } else {
+                        const li = document.createElement('li');
+                        li.textContent = `${file.name} - INVALID (must be .txt)`;
+                        li.classList.add('text-red-600', 'font-semibold');
+                        list.appendChild(li);
+                    }
+                });
+                fileList.appendChild(list);
+                const hasValidFile = files.some(f => f.type === 'text/plain');
+                analyzeButton.disabled = !hasValidFile;
+            } else {
+                analyzeButton.disabled = true;
+            }
+        }
+
+        // --- CORE LOGIC ---
+        analyzeButton.addEventListener('click', handleAnalysis);
+        interpretButton.addEventListener('click', getInterpretation);
+
+        /**
+         * Main function to handle the analysis process
+         */
+        async function handleAnalysis() {
+            loadingSpinner.classList.remove('hidden');
+            loadingSpinner.classList.add('flex');
+            resultsSection.classList.add('hidden');
+            
+            allFileDataMaps = [];
+            const files = Array.from(fileUpload.files).filter(f => f.type === 'text/plain');
+
+            if (files.length === 0) {
+                // Use custom message box instead of alert
+                showModal('Error', 'No valid .txt files were selected.');
+                loadingSpinner.classList.add('hidden');
+                loadingSpinner.classList.remove('flex');
+                return;
+            }
+
+            for (const file of files) {
+                try {
+                    const text = await file.text();
+                    const map = parseVNGText(text);
+                    allFileDataMaps.push({ name: file.name, data: map });
+                } catch (err) {
+                    console.error(`Error parsing file ${file.name}:`, err);
+                    showModal('Error', `Failed to parse ${file.name}.`);
+                }
+            }
+            
+            analysisResults = runAnalysis(allFileDataMaps);
+            updateTableHeader(allFileDataMaps.map(f => f.name));
+            renderTable(analysisResults);
+
+            loadingSpinner.classList.add('hidden');
+            loadingSpinner.classList.remove('flex');
+            
+            let totalMetrics = 0;
+            analysisResults.forEach(metricsMap => totalMetrics += metricsMap.size);
+            
+            resultsHeader.textContent = `Analysis Results (${totalMetrics} common tests found across ${allFileDataMaps.length} files)`;
+            resultsSection.classList.remove('hidden');
+            
+            // Reset chart and interpretation
+            if (currentChart) {
+                currentChart.destroy();
+                currentChart = null;
+            }
+            chartInstruction.classList.remove('hidden');
+            chartInstruction.textContent = 'Click a category or metric row in the table to see the chart.';
+            chartDisclaimer.classList.add('hidden'); // Hide disclaimer on init
+            interpretationOutput.classList.add('hidden');
+            interpretationOutput.innerHTML = '';
+        }
+
+        /**
+         * Parses the raw text of a VNG file into a structured Map.
+         * @param {string} text - The raw text content of the .txt file.
+         * @returns {Map<string, {value: number, isFlagged: boolean}>} A Map where key is "Category: Metric" and value is an object with value and flag status.
+         */
+        function parseVNGText(text) {
+            const dataMap = new Map();
+            let currentCategory = "General";
+            const lines = text.split('\n');
+            
+            const valueRegex = /: ([\d.-]+)[\s%a-zA-Z]*?(\| FLAG)?$/;
+
+            for (const line of lines) {
+                const trimmedLine = line.trim();
+                if (!trimmedLine) continue;
+
+                const match = trimmedLine.match(valueRegex);
+
+                if (match && match[1]) {
+                    const value = parseFloat(match[1]);
+                    if (isNaN(value)) continue;
+
+                    // NEW: Check if the flag (match[2]) exists
+                    const isFlagged = match[2] !== undefined;
+
+                    let metricName = trimmedLine.substring(0, trimmedLine.lastIndexOf(':')).trim();
+                    metricName = metricName.replace(/\s*\([^)]+\)$/, '').trim();
+                    
+                    const fullKey = `${currentCategory}: ${metricName}`;
+                    // NEW: Store an object with value and flag status
+                    dataMap.set(fullKey, { value: value, isFlagged: isFlagged });
+
+                } else if (trimmedLine.endsWith(':') && !trimmedLine.match(valueRegex) && !trimmedLine.startsWith('Summary of Flagged Findings')) {
+                    // This line is a new category
+                    currentCategory = trimmedLine.slice(0, -1).trim();
+                    // Handle section headers like "VISUOMOTOR //"
+                    if (currentCategory.endsWith(' //')) {
+                        // FIX: Corrected typo from currentSlicesection to currentCategory
+                        currentCategory = currentCategory.slice(0, -3).trim();
+                    }
+                }
+            }
+            return dataMap;
+        }
+
+        /**
+         * Analyzes the data from multiple file maps.
+         * @param {Array<{name: string, data: Map<string, {value: number, isFlagged: boolean}>}>} maps - An array of file data maps.
+         * @returns {Map<string, Map<string, {values: number[], flags: boolean[], delta: number|null, stdDev: number|null, percentChange: number|null}>>}
+         */
+        function runAnalysis(maps) {
+            /** @type {Map<string, Map<string, {values: number[], flags: boolean[], delta: number|null, stdDev: number|null, percentChange: number|null}>>} */
+            const results = new Map();
+            if (maps.length === 0) return results;
+
+            const firstMap = maps[0].data;
+
+            // 1. Find common keys ("Apples to Apples")
+            const commonKeys = [];
+            firstMap.forEach((value, key) => {
+                let isCommon = true;
+                for (let i = 1; i < maps.length; i++) {
+                    if (!maps[i].data.has(key)) {
+                        isCommon = false;
+                        break;
+                    }
+                }
+                if (isCommon) {
+                    commonKeys.push(key);
+                }
+            });
+
+            // 2. Populate results and calculate stats
+            for (const key of commonKeys) {
+                const parts = key.split(': ');
+                if (parts.length < 2) continue; // Skip if parsing failed
+                
+                const category = parts[0];
+                const metric = parts.slice(1).join(': '); // Re-join if metric had a ':'
+
+                // NEW: Extract values and flags separately
+                const values = maps.map(map => map.data.get(key).value);
+                const flags = maps.map(map => map.data.get(key).isFlagged);
+                
+                let delta = null;
+                let stdDev = null;
+                let percentChange = null; // NEW: For % Change
+
+                if (maps.length === 2) {
+                    delta = values[1] - values[0];
+                    // NEW: Calculate percent change
+                    percentChange = calculatePercentChange(values[0], values[1]);
+                }
+                if (maps.length >= 2) { 
+                    stdDev = calculateStdDev(values);
+                }
+                
+                // Ensure category map exists
+                if (!results.has(category)) {
+                    results.set(category, new Map());
+                }
+                
+                // Set metric data
+                // NEW: Add flags and percentChange to the stored object
+                results.get(category).set(metric, { values, flags, delta, stdDev, percentChange });
+            }
+            return results;
+        }
+
+        /**
+         * Calculates the standard deviation of an array of numbers.
+         * @param {number[]} arr - Array of numbers.
+         * @returns {number} The standard deviation.
+         */
+        function calculateStdDev(arr) {
+            if (arr.length < 2) return 0;
+            const mean = arr.reduce((acc, val) => acc + val, 0) / arr.length;
+            const variance = arr.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / (arr.length - 1); // Sample Stdev
+            return Math.sqrt(variance);
+        }
+
+        /**
+         * Updates the table header to have dynamic file columns.
+         * @param {string[]} fileNames - Array of file names.
+         */
+        function updateTableHeader(fileNames) {
+            resultsTableHead.innerHTML = ''; // Clear old header
+            const tr = document.createElement('tr');
+            
+            let headerHTML = `<th scope="col" class="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Test Name</th>`;
+            
+            fileNames.forEach((name, index) => {
+                headerHTML += `<th scope="col" class="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider" title="${name}">File ${index + 1}</th>`;
+            });
+            
+            // NEW: Renamed Change to Abs. Change and added Perc. Change
+            headerHTML += `<th scope="col" class="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Abs. Change (Δ)</th>`;
+            headerHTML += `<th scope="col" class="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Perc. Change (%)</th>`;
+            headerHTML += `<th scope="col" class="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Std. Dev (σ)</th>`;
+            
+            tr.innerHTML = headerHTML;
+            resultsTableHead.appendChild(tr);
+        }
+
+
+        /**
+         * Renders the analysis results into the HTML table.
+         * @param {Map<string, Map<string, {values: number[], delta: number|null, stdDev: number|null}>>} results - The analysis results map.
+         */
+        function renderTable(results) {
+            resultsTableBody.innerHTML = ''; // Clear old results
+            const numFileCols = allFileDataMaps.length;
+            // NEW: Increased totalCols to account for new % change column
+            const totalCols = numFileCols + 4; // Metric + Files + Abs.Delta + Perc.Delta + StdDev
+
+            if (results.size === 0) {
+                resultsTableBody.innerHTML = `<tr><td colspan="${totalCols}" class="text-center p-4 text-gray-500">No common tests found across all uploaded files.</td></tr>`;
+                return;
+            }
+            
+            // Sort categories alphabetically
+            const sortedCategories = [...results.keys()].sort();
+
+            for (const category of sortedCategories) {
+                const metricsMap = results.get(category);
+                
+                // 1. Render Category Row
+                const catRow = document.createElement('tr');
+                catRow.classList.add('category-row', 'bg-gray-200', 'font-semibold', 'transition-colors', 'duration-150');
+                catRow.innerHTML = `<td colspan="${totalCols}" class="px-4 py-3 text-sm text-gray-800"><span class="toggle-icon open"></span>${category}</td>`;
+                
+                catRow.addEventListener('click', (e) => {
+                    // Prevent row click from firing when clicking the metric
+                    if (e.target.closest('.metric-row')) return; 
+
+                    // 1. Toggle collapsible
+                    const metricRows = document.querySelectorAll(`#resultsTableBody tr[data-category="${category}"]`);
+                    const icon = catRow.querySelector('.toggle-icon');
+                    
+                    let isHidden = false;
+                    metricRows.forEach(row => {
+                        row.classList.toggle('hidden');
+                        isHidden = row.classList.contains('hidden');
+                    });
+                    
+                    if (isHidden) {
+                        icon.classList.remove('open');
+                        icon.classList.add('closed');
+                    } else {
+                        icon.classList.remove('closed');
+                        icon.classList.add('open');
+                    }
+
+                    // 2. Render NEW chart (clustered column)
+                    renderClusteredColumnForCategory(category, metricsMap);
+
+                    // 3. Highlight
+                    Array.from(resultsTableBody.children).forEach(row => row.classList.remove('bg-blue-100', 'bg-blue-50'));
+                    catRow.classList.add('bg-blue-100');
+                });
+                resultsTableBody.appendChild(catRow);
+
+                // 2. Render Metric Rows for this category
+                // Sort metrics alphabetically
+                const sortedMetrics = [...metricsMap.keys()].sort();
+
+                for (const metric of sortedMetrics) {
+                    const data = metricsMap.get(metric);
+                    const tr = document.createElement('tr');
+                    tr.classList.add('metric-row', 'transition-colors', 'duration-150');
+                    tr.dataset.category = category; // Add data-category for toggling
+                    
+                    let rowHTML = `<td class="pl-8 pr-4 py-3 text-sm font-medium text-gray-900">${metric}</td>`;
+                    
+                    // NEW: Loop through values and add flag icon if present
+                    data.values.forEach((v, index) => {
+                        const isFlagged = data.flags[index];
+                        const flagIcon = isFlagged ? '<span class="text-red-500 font-bold ml-1" title="Flagged in report">!</span>' : '';
+                        rowHTML += `<td class="px-4 py-3 text-sm text-gray-600">${v.toFixed(2)}${flagIcon}</td>`;
+                    });
+                    
+                    rowHTML += `
+                        <td class="px-4 py-3 text-sm text-gray-600 ${data.delta === null ? '' : (data.delta > 0 ? 'text-red-600' : 'text-green-600')}">
+                            ${data.delta !== null ? data.delta.toFixed(2) : 'N/A'}
+                        </td>
+                        <!-- NEW: Add Percent Change Column -->
+                        <td class="px-4 py-3 text-sm text-gray-600 ${data.percentChange === null ? '' : (data.percentChange > 0 ? 'text-red-600' : 'text-green-600')}">
+                            ${data.percentChange !== null ? data.percentChange.toFixed(2) + '%' : 'N/A'}
+                        </td>
+                        <td class="px-4 py-3 text-sm text-gray-600">${data.stdDev !== null ? data.stdDev.toFixed(2) : 'N/A'}</td>
+                    `;
+                    
+                    tr.innerHTML = rowHTML;
+                    
+                    tr.addEventListener('click', (e) => {
+                        e.stopPropagation(); // Stop event from bubbling to category row
+                        // Call NEW chart (line chart)
+                        renderLineChartForMetric(metric, data.values);
+                        // Highlight selected row
+                        Array.from(resultsTableBody.children).forEach(row => row.classList.remove('bg-blue-100', 'bg-blue-50'));
+                        tr.classList.add('bg-blue-50');
+                    });
+                    
+                    resultsTableBody.appendChild(tr);
+                }
+            }
+        }
+
+        /**
+         * Renders the LINE chart for a selected test (RAW values).
+         * @param {string} metricName - The name of the test (for the title).
+         * @param {number[]} values - The array of values to plot.
+         */
+        function renderLineChartForMetric(metricName, values) {
+            chartInstruction.classList.add('hidden');
+            chartDisclaimer.classList.add('hidden'); // Hide disclaimer
+            if (currentChart) {
+                currentChart.destroy();
+            }
+            
+            const labels = allFileDataMaps.map((map, i) => map.name || `File ${i + 1}`);
+            const datasets = [];
+            const showTrendlines = labels.length >= 3;
+
+            // Main metric line
+            datasets.push({
+                label: metricName,
+                data: values,
+                borderColor: 'rgba(59, 130, 246, 1)',
+                backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                fill: false,
+                tension: 0.1
+            });
+            
+            // Trendline
+            if (showTrendlines) {
+                const trendlineData = calculateLinearRegression(values);
+                datasets.push({
+                    label: `${metricName} (Trend)`,
+                    data: trendlineData,
+                    borderColor: 'rgba(59, 130, 246, 1)',
+                    borderDash: [5, 5],
+                    fill: false,
+                    pointRadius: 0,
+                    tension: 0.1
+                });
+            }
+            
+            currentChart = new Chart(chartCanvas, {
+                type: 'line', // This is now a line chart
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: `${metricName} (Raw Values)`,
+                            font: { size: 16 }
+                        },
+                        legend: {
+                            display: showTrendlines, // Only show legend if there's a trendline
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            title: {
+                                display: true,
+                                text: 'Raw Value'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        /**
+         * Helper to calculate percent change, handling division by zero.
+         * @param {number} baseline - The File 1 value.
+         * @param {number} newValue - The current file's value.
+         * @returns {number | null} The percent change, or null if N/A.
+         */
+        function calculatePercentChange(baseline, newValue) {
+            if (baseline === 0) {
+                return (newValue === 0) ? 0 : null; // 0->0 is 0% change. 0->5 is Inf change (skip)
+            }
+            if (baseline === null || baseline === undefined || newValue === null || newValue === undefined) {
+                return null; // Skip if data is missing
+            }
+            return ((newValue - baseline) / baseline) * 100;
+        }
+
+        /**
+         * Renders the CLUSTERED COLUMN chart for a selected category.
+         * If 1 file: shows raw values.
+         * If >1 file: shows PERCENT CHANGE from File 1.
+         * @param {string} categoryName - The name of the category.
+         * @param {Map<string, {values: number[]}>} metricsMap - The map of metrics for this category.
+         */
+        function renderClusteredColumnForCategory(categoryName, metricsMap) {
+            chartInstruction.classList.add('hidden');
+            chartDisclaimer.classList.add('hidden'); // Hide by default
+            if (currentChart) {
+                currentChart.destroy();
+            }
+
+            const metricNames = [...metricsMap.keys()].sort();
+            const fileNames = allFileDataMaps.map((map, i) => map.name || `File ${i + 1}`);
+            const datasets = [];
+            let chartTitle = `Category: ${categoryName}`;
+            let yAxisTitle = 'Raw Value';
+
+            const colors = ['#3B82F6', '#10B981', '#EF4444', '#F59E0B', '#8B5CF6', '#EC4899', '#6366F1', '#14B8A6'];
+
+            if (allFileDataMaps.length === 1) {
+                // --- LOGIC FOR 1 FILE (RAW VALUES) ---
+                const dataForFile = metricNames.map(metric => metricsMap.get(metric).values[0]);
+                datasets.push({
+                    label: fileNames[0],
+                    data: dataForFile,
+                    backgroundColor: colors[0],
+                    borderColor: colors[0],
+                    borderWidth: 1
+                });
+                chartTitle = `Category: ${categoryName} (Raw Values)`;
+                yAxisTitle = 'Raw Value';
+
+            } else {
+                // --- LOGIC FOR >1 FILE (% CHANGE) ---
+                // We need one dataset per FILE (except File 1)
+                fileNames.forEach((fileName, fileIndex) => {
+                    if (fileIndex === 0) return; // Skip File 1 (baseline)
+
+                    const dataForThisFile = [];
+                    // For each metric, get the % change from File 1
+                    metricNames.forEach(metric => {
+                        const metricData = metricsMap.get(metric);
+                        const baseline = metricData.values[0];
+                        const newValue = metricData.values[fileIndex];
+                        const percentChange = calculatePercentChange(baseline, newValue);
+                        dataForThisFile.push(percentChange);
+                    });
+                    
+                    const color = colors[fileIndex % colors.length];
+                    datasets.push({
+                        label: `${fileName} (% Change)`,
+                        data: dataForThisFile,
+                        backgroundColor: color,
+                        borderColor: color,
+                        borderWidth: 1
+                    });
+                });
+                
+                chartTitle = `Category Comparison: ${categoryName} (% Change from File 1)`;
+                yAxisTitle = 'Percent Change (%)';
+                // Show the disclaimer
+                chartDisclaimer.classList.remove('hidden');
+                chartDisclaimer.textContent = 'Values are shown as % change from File 1 to normalize different scales (e.g., msec vs. %). Raw values are in the table and the single-metric line chart.';
+            }
+
+
+            currentChart = new Chart(chartCanvas, {
+                type: 'bar', // This is a 'bar' (column) chart
+                data: {
+                    labels: metricNames, // X-axis is the metric names
+                    datasets: datasets  // Datasets are the files
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: chartTitle,
+                            font: { size: 16 }
+                        },
+                        legend: {
+                            position: 'bottom',
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        // Add % sign only if it's the % change chart
+                                        const suffix = (allFileDataMaps.length > 1) ? '%' : '';
+                                        label += context.parsed.y.toFixed(2) + suffix;
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            title: {
+                                display: true,
+                                text: yAxisTitle
+                            }
+                        }
+                    },
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                }
+            });
+        }
+        
+        /**
+         * Calculates a simple linear regression trendline.
+         * @param {number[]} yValues - Array of Y-axis values.
+         * @returns {number[]} Array of Y-values for the trendline.
+         */
+        function calculateLinearRegression(yValues) {
+            const n = yValues.length;
+            if (n < 2) return [];
+
+            let sumX = 0;
+            let sumY = 0;
+            let sumXY = 0;
+            let sumXX = 0;
+            const xValues = Array.from({length: n}, (_, i) => i);
+            const validPoints = [];
+
+            for (let i = 0; i < n; i++) {
+                if (yValues[i] !== null && yValues[i] !== undefined) {
+                    validPoints.push({ x: xValues[i], y: yValues[i] });
+                }
+            }
+            
+            if (validPoints.length < 2) return new Array(n).fill(null);
+
+            const vn = validPoints.length;
+            sumX = validPoints.reduce((acc, p) => acc + p.x, 0);
+            sumY = validPoints.reduce((acc, p) => acc + p.y, 0);
+            sumXY = validPoints.reduce((acc, p) => acc + p.x * p.y, 0);
+            sumXX = validPoints.reduce((acc, p) => acc + p.x * p.x, 0);
+
+            let slope, intercept;
+            if (vn * sumXX - sumX * sumX === 0) {
+                // Vertical line - unlikely with 0,1,2.. x-values, but good to check
+                slope = 0;
+                intercept = sumY / vn;
+            } else {
+                 slope = (vn * sumXY - sumX * sumY) / (vn * sumXX - sumX * sumX);
+                 intercept = (sumY - slope * sumX) / vn;
+            }
+
+
+            return xValues.map(x => (slope * x + intercept));
+        }
+
+        // --- GEMINI API ---
+
+        /**
+         * Builds the prompt and calls the Gemini API for interpretation.
+         */
+        async function getInterpretation() {
+            interpretationLoading.classList.remove('hidden');
+            interpretationLoading.classList.add('flex');
+            interpretationOutput.classList.add('hidden');
+            interpretationOutput.innerHTML = '';
+
+            const { systemPrompt, userQuery } = buildInterpretationPrompt(analysisResults);
+            
+            const apiKey = ""; // Leave as-is, handled by environment
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                tools: [{ "google_search": {} }],
+                systemInstruction: {
+                    parts: [{ text: systemPrompt }]
+                },
+            };
+            
+            try {
+                // Implement exponential backoff for retries
+                let response;
+                let retries = 0;
+                const maxRetries = 3;
+                let delay = 1000; // 1 second
+
+                while (retries < maxRetries) {
+                    response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (response.ok) {
+                        break; // Success
+                    }
+                    
+                    // Retry on 5xx errors or 429 (Too Many Requests)
+                    if (response.status >= 500 || response.status === 429) {
+                        retries++;
+                        if (retries < maxRetries) {
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                            delay *= 2; // Exponential backoff
+                        } else {
+                            throw new Error(`API Error: ${response.status} ${response.statusText} (Max retries reached)`);
+                        }
+                    } else {
+                        // Don't retry on client errors like 400
+                        throw new Error(`API Error: ${response.status} ${response.statusText}`);
+                    }
+                }
+
+                const result = await response.json();
+                
+                if (result.candidates && result.candidates[0].content?.parts?.[0]?.text) {
+                    const text = result.candidates[0].content.parts[0].text;
+                    // Basic markdown-to-HTML
+                    let html = text.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>');
+                    // Fix potential <p> at start
+                    if (!html.startsWith('<p>')) html = '<p>' + html + '</p>';
+                    html = html.replace(/<p><\/p>/g, '');
+                    
+                    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                    html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+                    interpretationOutput.innerHTML = html;
+                } else {
+                    console.error("Invalid API response structure:", result);
+                    interpretationOutput.innerHTML = '<p class="text-red-600">Error: Received an invalid response from the AI. Check the console for details.</p>';
+                }
+
+            } catch (err) {
+                console.error("Failed to get interpretation:", err);
+                interpretationOutput.innerHTML = `<p class="text-red-600"><strong>Error:</strong> Failed to fetch interpretation. ${err.message}</p>`;
+            } finally {
+                interpretationLoading.classList.add('hidden');
+                interpretationLoading.classList.remove('flex');
+                interpretationOutput.classList.remove('hidden');
+            }
+        }
+
+        /**
+         * Constructs the system and user prompts for the Gemini API call.
+         * @param {Map<string, Map<string, {values: number[], delta: number|null, stdDev: number|null}>>} results - The analysis results map.
+         * @returns {{systemPrompt: string, userQuery: string}}
+         */
+        function buildInterpretationPrompt(results) {
+            const numFiles = allFileDataMaps.length;
+            // NEW: Updated prompt to include Executive Summary
+            const systemPrompt = `Act as an expert clinical audiologist specializing in vestibular disorders. Your task is to provide a high-level clinical interpretation of VNG test data. The user will provide a summary of ${numFiles} tests. You must use Google Search to find normative data, test-retest reliability, and clinical significance for changes or variability in these specific VNG metrics.
+
+Your response MUST follow this structure:
+1.  **Executive Summary (TL;DR):** Start with a 2-3 sentence high-level summary of the most significant findings (e.g., "The main finding is a significant change in Saccades, while Pursuit tests remain stable.").
+2.  **Detailed Analysis:**
+    a. Acknowledge the number of tests being compared.
+    b. For each metric, comment on the observed values.
+    c. If a value is 'Flagged', note this and state that it was outside the normative range in that specific report.
+    d. If 2 tests, comment on the 'change' (delta and percent change). Use Google Search to determine if this change is likely clinically significant or within normal test-retest reliability.
+    e. If 3+ tests, comment on the 'variability' (standard deviation). Use Google Search to determine if this level of variability is high or low for this metric.
+3.  **Overall Summary:** Synthesize all the detailed findings into a cohesive summary.
+4.  **Disclaimer:** **Crucially, conclude with a clear disclaimer that this is not medical advice and a formal diagnosis requires a qualified healthcare professional.**`;
+
+            let dataString = "";
+            let count = 0;
+            const maxMetrics = 15;
+            
+            // Limit to first N results to avoid overly long prompt
+            for (const [category, metricsMap] of results.entries()) {
+                if (count >= maxMetrics) break;
+                dataString += `\nCategory: '${category}'\n`;
+                for (const [metric, data] of metricsMap.entries()) {
+                    if (count >= maxMetrics) break;
+                    
+                    dataString += `  - Test: '${metric}'\n`;
+                    dataString += `    - Values: [${data.values.map(v => v.toFixed(2)).join(', ')}]\n`;
+                    
+                    // NEW: Add flag information
+                    const flags = data.flags.map((f, i) => f ? `File ${i+1}: Flagged` : null).filter(Boolean).join(', ');
+                    if (flags) {
+                        dataString += `    - Flags: [${flags}]\n`;
+                    }
+
+                    if (data.delta !== null) {
+                        dataString += `    - Abs. Change (Delta): ${data.delta.toFixed(2)}\n`;
+                    }
+                    // NEW: Add percent change to prompt
+                    if (data.percentChange !== null) {
+                        dataString += `    - Perc. Change: ${data.percentChange.toFixed(2)}%\n`;
+                    }
+                    if (data.stdDev !== null) {
+                        dataString += `    - Standard Deviation: ${data.stdDev.toFixed(2)}\n`;
+                    }
+                    count++;
+                }
+            }
+            if (count >= maxMetrics) {
+                dataString += "\n... and more ...\n";
+            }
+
+
+            const userQuery = `I have analyzed ${numFiles} VNG reports. Here is a summary of the metrics that were common across all files:
+${dataString}
+
+Please provide a high-level clinical interpretation of these findings. Focus on whether the changes (for 2 tests) or variability (for 3+ tests) are clinically significant, using Google Search to find normative data and test-retest reliability for these specific VNG metrics. Pay attention to any 'Flagged' items, as these were outside normative ranges on the report.`;
+            
+            return { systemPrompt, userQuery };
+        }
+        
+        /**
+         * Simple modal for alerts/errors.
+         */
+        function showModal(title, message) {
+            // Check if a modal already exists
+            if (document.getElementById('appModal')) return;
+
+            const modalBackdrop = document.createElement('div');
+            modalBackdrop.id = 'appModal';
+            modalBackdrop.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center z-50';
+
+            const modalContent = document.createElement('div');
+            modalContent.className = 'relative p-5 border w-96 max-w-full shadow-lg rounded-md bg-white';
+            
+            const modalHeader = document.createElement('h3');
+            modalHeader.className = 'text-lg font-medium text-gray-900';
+            modalHeader.textContent = title;
+            
+            const modalBody = document.createElement('div');
+            modalBody.className = 'text-sm text-gray-700 mt-2';
+            modalBody.textContent = message;
+
+            const modalFooter = document.createElement('div');
+            modalFooter.className = 'mt-4 flex justify-end';
+            
+            const closeButton = document.createElement('button');
+            closeButton.className = 'px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700';
+            closeButton.textContent = 'OK';
+            closeButton.onclick = () => {
+                modalBackdrop.remove();
+            };
+            
+            modalFooter.appendChild(closeButton);
+            modalContent.append(modalHeader, modalBody, modalFooter);
+            modalBackdrop.appendChild(modalContent);
+            document.body.appendChild(modalBackdrop);
+        }
+    }); // End of DOMContentLoaded wrapper
+    </script>
+</body>
+</html>
